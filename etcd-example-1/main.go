@@ -81,8 +81,8 @@ func main() {
 	}
 	go ser.ListenLeaseRespChan()
 	select {
-	case <-time.After(20 * time.Second):
-		ser.CloseService()
+	//case <-time.After(20 * time.Second):
+	//	ser.CloseService()
 	}
 
 }
