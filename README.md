@@ -191,4 +191,9 @@ lease 694d867d086ac259 granted with TTL(999s), remaining(972s), attached keys([]
 - 监听 续租情况
 - 注销服务
 
+#### Problem
+```
+go get go.etcd.io/etcd/clientv3@release-3.4
+```
+
 ### 服务发现
