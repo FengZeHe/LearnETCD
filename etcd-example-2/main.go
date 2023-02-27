@@ -53,7 +53,9 @@ func (s *ServiceDescovery) watcher(prefix string) {
 		for _, ev := range wresp.Events {
 			switch ev.Type {
 			case mvccpb.PUT:
-
+				s.SetServiceList(string(ev.Kv.Key), string(ev.Kv.Value))
+			case mvccpb.DELETE:
+				s.DelServicelist(string(ev.Kv.Key))
 			}
 		}
 	}
