@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"fmt"
+	"go.etcd.io/etcd/clientv3"
 	"log"
 	"time"
 )
 
-// ServiceRegister 创建租约注册服务
-type ServiceRegister struct {
+type ServiceResgiter struct {
 	cli           *clientv3.Client
 	leaseID       clientv3.LeaseID
 	keepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
@@ -16,83 +16,73 @@ type ServiceRegister struct {
 	val           string
 }
 
-// NewServiceRegister 新建注册服务
-func NewServiceRegister(endpoints []string, key string, val string, leaseID int64) (*ServiceRegister, error) {
+func NewRegisterService(endpoints []string, key, val string, lease int64) (*ServiceResgiter, error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 	})
-
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	ser := &ServiceRegister{
+	ser := &ServiceResgiter{
 		cli: cli,
 		key: key,
 		val: val,
 	}
-
-	// 申请租约设置时间keepalive
-	if err := ser.putKeyWithLease(leaseID); err != nil {
+	if err := ser.putKeyWithLease(lease); err != nil {
 		return nil, err
 	}
 	return ser, nil
 }
 
-// 设置租约
-func (s *ServiceRegister) putKeyWithLease(lease int64) error {
+func (s *ServiceResgiter) putKeyWithLease(lease int64) error {
+	// set lease time
 	resp, err := s.cli.Grant(context.Background(), lease)
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
 
-	// 注册服务并绑定租约
+	// register
 	_, err = s.cli.Put(context.Background(), s.key, s.val, clientv3.WithLease(resp.ID))
 	if err != nil {
 		return err
 	}
-
-	// 设置租约 定期发送需求请求
-
+	//
 	leaseRespChan, err := s.cli.KeepAlive(context.Background(), resp.ID)
 	if err != nil {
 		return err
 	}
 	s.leaseID = resp.ID
-	log.Println(s.leaseID)
+	fmt.Println(s.leaseID)
 	s.keepAliveChan = leaseRespChan
-	log.Printf("Put key %s val %s success!", s.key, s.val)
+	fmt.Printf("Put key %s val %s", s.key, s.cli)
 	return nil
 }
 
-// ListenLeaseRespdChan 监听 续租情况
-func (s *ServiceRegister) ListenLeaseRspChan() {
+func (s *ServiceResgiter) ListenLeaseRespChan() {
 	for leaseKeepResp := range s.keepAliveChan {
-		log.Println("续约成功", leaseKeepResp)
+		log.Println("renew lease success", leaseKeepResp)
 	}
-	log.Println("关闭续约")
+	log.Println("close renow lease")
 }
 
-// Close 注销服务
-func (s *ServiceRegister) Close() error {
-	//	撤销租约
+func (s *ServiceResgiter) CloseService() error {
 	if _, err := s.cli.Revoke(context.Background(), s.leaseID); err != nil {
 		return err
 	}
-	log.Println("撤销租约")
 	return s.cli.Close()
 }
 
 func main() {
-	var endpoint = []string{"localhost:2379"}
-	ser, err := NewServiceRegister(endpoint, "/web/node1", "localhost:8000", 5)
-
+	var endpoints = []string{"localhost:2379"}
+	ser, err := NewRegisterService(endpoints, "/web/node1", "localhost:8000", 5)
 	if err != nil {
 		log.Fatal(err)
 	}
+	go ser.ListenLeaseRespChan()
+	select {
+	case <-time.After(20 * time.Second):
+		ser.CloseService()
+	}
 
-	// 监听续租相应chan
-	go ser.ListenLeaseRspChan()
-	select {}
 }
