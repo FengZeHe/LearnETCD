@@ -16,6 +16,7 @@ type ServiceResgiter struct {
 	val           string
 }
 
+// 新建注册服务
 func NewRegisterService(endpoints []string, key, val string, lease int64) (*ServiceResgiter, error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -35,6 +36,7 @@ func NewRegisterService(endpoints []string, key, val string, lease int64) (*Serv
 	return ser, nil
 }
 
+// 设置租约
 func (s *ServiceResgiter) putKeyWithLease(lease int64) error {
 	// set lease time
 	resp, err := s.cli.Grant(context.Background(), lease)
@@ -59,14 +61,17 @@ func (s *ServiceResgiter) putKeyWithLease(lease int64) error {
 	return nil
 }
 
+// 监听&续租情况
 func (s *ServiceResgiter) ListenLeaseRespChan() {
 	for leaseKeepResp := range s.keepAliveChan {
 		log.Println("renew lease success", leaseKeepResp)
 	}
-	log.Println("close renow lease")
+	log.Println("close renew lease")
 }
 
+// 关闭服务
 func (s *ServiceResgiter) CloseService() error {
+	// 撤销租约
 	if _, err := s.cli.Revoke(context.Background(), s.leaseID); err != nil {
 		return err
 	}

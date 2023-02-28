@@ -183,17 +183,207 @@ lease 694d867d086ac259 granted with TTL(999s), remaining(972s), attached keys([]
 ### 服务注册＆健康检查
 
 我们启动一个服务并注册到ETCD中，同时通过绑定租约和自动续租约的方式实现健康检查。
-
-#### 实现步骤
-- 创建租约注册服务
-- 新建注册服务
-- 设置租约
-- 监听 续租情况
-- 注销服务
-
-#### Problem
 ```
+// 创建租约服务注册
+type ServiceResgiter struct {
+	cli           *clientv3.Client
+	leaseID       clientv3.LeaseID
+	keepAliveChan <-chan *clientv3.LeaseKeepAliveResponse
+	key           string
+	val           string
+}
+
+// 创建注册服务
+func NewRegisterService(endpoints []string, key, val string, lease int64) (*ServiceResgiter, error) {
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	ser := &ServiceResgiter{
+		cli: cli,
+		key: key,
+		val: val,
+	}
+  
+	if err := ser.putKeyWithLease(lease); err != nil {
+		return nil, err
+	}
+	return ser, nil
+}
+
+
+// 设置租约
+func (s *ServiceResgiter) putKeyWithLease(lease int64) error {
+	// set lease time
+	resp, err := s.cli.Grant(context.Background(), lease)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 注册&绑定租约
+	_, err = s.cli.Put(context.Background(), s.key, s.val, clientv3.WithLease(resp.ID))
+	if err != nil {
+		return err
+	}
+	// 续约
+	leaseRespChan, err := s.cli.KeepAlive(context.Background(), resp.ID)
+	if err != nil {
+		return err
+	}
+	s.leaseID = resp.ID
+	fmt.Println(s.leaseID)
+	s.keepAliveChan = leaseRespChan
+	fmt.Printf("Put key %s val %s", s.key, s.cli)
+	return nil
+}
+
+// 关闭服务
+func (s *ServiceResgiter) CloseService() error {
+	// 撤销租约
+	if _, err := s.cli.Revoke(context.Background(), s.leaseID); err != nil {
+		return err
+	}
+	return s.cli.Close()
+}
+```
+完整代码：https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-1
+
+### 服务发现
+```
+// 服务发现
+type ServiceDescovery struct {
+	cli        *clientv3.Client
+	serverList map[string]string
+	lock       sync.Mutex
+}
+
+// 新建服务发现
+func NewServiceDiscovery(endpoints []string) *ServiceDescovery {
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: 5 * time.Second,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return &ServiceDescovery{
+		cli:        cli,
+		serverList: make(map[string]string),
+	}
+}
+
+// WatchService 查看已有服务＆监听
+func (s *ServiceDescovery) WatchService(prefix string) error {
+	resp, err := s.cli.Get(context.Background(), prefix, clientv3.WithPrefix())
+	if err != nil {
+		return err
+	}
+
+	for _, ev := range resp.Kvs {
+		s.SetServiceList(string(ev.Key), string(ev.Value))
+	}
+	go s.watcher(prefix)
+	return nil
+}
+
+// 根据前缀监听
+func (s *ServiceDescovery) watcher(prefix string) {
+	rch := s.cli.Watch(context.Background(), prefix, clientv3.WithPrefix())
+	log.Printf("watching prefix : %s", prefix)
+	for wresp := range rch {
+		for _, ev := range wresp.Events {
+			switch ev.Type {
+			case mvccpb.PUT:
+				s.SetServiceList(string(ev.Kv.Key), string(ev.Kv.Value))
+			case mvccpb.DELETE:
+				s.DelServicelist(string(ev.Kv.Key))
+			}
+		}
+	}
+}
+
+// add service address
+func (s *ServiceDescovery) SetServiceList(key, val string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.serverList[key] = string(val)
+	fmt.Printf("put key: %s val: %s", key, val)
+}
+
+// delete service address
+func (s *ServiceDescovery) DelServicelist(key string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	delete(s.serverList, key)
+	fmt.Printf("delete key %s", key)
+}
+
+// Get service address
+func (s *ServiceDescovery) GetService() []string {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	address := make([]string, 0)
+	for _, v := range s.serverList {
+		address = append(address, v)
+	}
+	return address
+}
+
+// Close Service
+func (s *ServiceDescovery) CloseService() error {
+	return s.cli.Close()
+}
+```
+
+完整代码：https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-2
+
+### 实践
+1. 运行服务注册代码（第一部分代码）
+
+   ![](./png/step1.png)
+
+2. 运行服务发现代码（第二部分代码）
+
+   当前显示只有 `localhost:8000`的服务注册进来。
+
+   ![](./png/step2.png)
+
+3. 使用`etcdctl`手动添加两个服务。
+
+   添加了 /web/node3和 /web/node4
+
+   ![](./png/step3.png)
+
+4. 查看控制台；看到 `/web/node3`和`/web/node4/`显示已经注册进来
+
+   ![](./png/step5.png)
+
+
+
+### 可能遇到的问题
+
+#### 使用go get go.etcd.io/etcd/clientv3使出现的问题
+
+```
+go: [go.etcd.io/etcd/client/v3@v3.5.7:](http://go.etcd.io/etcd/client/v3@v3.5.7:) verifying go.mod: [go.etcd.io/etcd/client/v3@v3.5.7/go.mod:](http://go.etcd.io/etcd/client/v3@v3.5.7/go.mod:) checking tree#15675525 against tree#15981595: reading [https://goproxy.io/sumdb/sum.golang.org/tile/8/1/239:](https://goproxy.io/sumdb/sum.golang.org/tile/8/1/239:) 404 Not Found server response: not found
+```
+
+#### 解决办法
+
+```shell
 go get go.etcd.io/etcd/clientv3@release-3.4
 ```
 
-### 服务发现
+
+
+### 引用
+
+[1] https://github.com/etcd-io/etcd/issues/12484
+
+[2] https://pkg.go.dev/go.etcd.io/etcd/client/v3#section-readme
+
+[3] https://www.cnblogs.com/FireworksEasyCool/p/12890649.html

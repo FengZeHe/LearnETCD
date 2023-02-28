@@ -10,12 +10,14 @@ import (
 	"time"
 )
 
+// 服务发现
 type ServiceDescovery struct {
 	cli        *clientv3.Client
 	serverList map[string]string
 	lock       sync.Mutex
 }
 
+// 新建服务发现
 func NewServiceDiscovery(endpoints []string) *ServiceDescovery {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
@@ -31,7 +33,7 @@ func NewServiceDiscovery(endpoints []string) *ServiceDescovery {
 	}
 }
 
-// WatchService
+// WatchService 查看已有服务＆监听
 func (s *ServiceDescovery) WatchService(prefix string) error {
 	resp, err := s.cli.Get(context.Background(), prefix, clientv3.WithPrefix())
 	if err != nil {
@@ -45,7 +47,7 @@ func (s *ServiceDescovery) WatchService(prefix string) error {
 	return nil
 }
 
-// watch prefix
+// 根据前缀监听
 func (s *ServiceDescovery) watcher(prefix string) {
 	rch := s.cli.Watch(context.Background(), prefix, clientv3.WithPrefix())
 	log.Printf("watching prefix : %s", prefix)
@@ -98,7 +100,6 @@ func main() {
 	ser := NewServiceDiscovery(endpoint)
 	defer ser.CloseService()
 	ser.WatchService("/web/")
-	ser.WatchService("/gRPC")
 	for {
 		select {
 		case <-time.Tick(10 * time.Second):
