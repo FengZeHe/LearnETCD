@@ -249,7 +249,7 @@ func (s *ServiceResgiter) CloseService() error {
 	return s.cli.Close()
 }
 ```
-完整代码：https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-1
+完整代码 [点这里](https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-1)
 
 ### 服务发现
 ```
@@ -339,8 +339,7 @@ func (s *ServiceDescovery) CloseService() error {
 }
 ```
 
-完整代码：https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-2
-
+完整代码 [点这里](https://github.com/FengZeHe/LearnETCD/tree/main/etcd-example-2)
 ### 实践
 1. 运行服务注册代码（第一部分代码）
 
